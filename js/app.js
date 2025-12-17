@@ -1608,7 +1608,7 @@ const AttachmentProcessor = {
     // Get AI description for image (uses Claude API if available)
     async getImageDescription(file, nodeLabel = '') {
         try {
-            const apiKey = localStorage.getItem('claude-api-key');
+            const apiKey = localStorage.getItem(CONFIG.API_KEY);
             if (!apiKey) {
                 return this.getBasicImageInfo(file);
             }
@@ -1669,7 +1669,7 @@ const AttachmentProcessor = {
     // Get AI summary for PDF
     async getPDFSummary(text, filename, nodeLabel = '') {
         try {
-            const apiKey = localStorage.getItem('claude-api-key');
+            const apiKey = localStorage.getItem(CONFIG.API_KEY);
             if (!apiKey || !text || text.length < 50) {
                 return `PDF document: ${filename}`;
             }
@@ -2288,7 +2288,7 @@ const AttachmentManager = {
 
     // Generate child nodes from attachment content
     async generateNodesFromAttachment(nodeId, attachment) {
-        const apiKey = localStorage.getItem('claude-api-key');
+        const apiKey = localStorage.getItem(CONFIG.API_KEY);
         if (!apiKey) {
             if (typeof showToast !== 'undefined') {
                 showToast('Set Claude API key in settings to generate nodes', 'error');
@@ -17386,7 +17386,7 @@ IMPORTANT: The searchPattern must be EXACT - copy the existing code precisely so
     // Call Claude API to generate patch
     async callClaudeForPatch(prompt) {
         // Check for API key
-        const apiKey = localStorage.getItem('claude_api_key');
+        const apiKey = localStorage.getItem(CONFIG.API_KEY);
         if (!apiKey) {
             throw new Error('Claude API key not set. Please add it in Settings.');
         }
@@ -28874,7 +28874,7 @@ const ImportNotes = {
     },
 
     async analyze() {
-        const apiKey = localStorage.getItem('claude_api_key');
+        const apiKey = localStorage.getItem(CONFIG.API_KEY);
         if (!apiKey) {
             showToast('Please set your Claude API key in Settings first', 'warning');
             this.close();
