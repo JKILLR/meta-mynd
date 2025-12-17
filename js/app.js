@@ -19650,6 +19650,8 @@ const _tempVec3B = new THREE.Vector3();
 const _tempVec3C = new THREE.Vector3();
 const _zoomRaycaster = new THREE.Raycaster();
 const _zoomMouse = new THREE.Vector2();
+const _dragIntersect = new THREE.Vector3();
+const _childTempPos = new THREE.Vector3();
 
 function initScene() {
     // Scene
@@ -22020,19 +22022,18 @@ function onPointerMove(event) {
     // Reparent drag logic
     if (reparentDragging && reparentNode) {
         raycaster.setFromCamera(mouse, camera);
-        const intersectPoint = new THREE.Vector3();
-        raycaster.ray.intersectPlane(dragPlane, intersectPoint);
+        raycaster.ray.intersectPlane(dragPlane, _dragIntersect);
 
-        if (intersectPoint) {
-            const newPos = intersectPoint.add(dragOffset);
-            reparentNode.userData.spring.target.copy(newPos);
+        if (_dragIntersect) {
+            _dragIntersect.add(dragOffset);
+            reparentNode.userData.spring.target.copy(_dragIntersect);
 
-            // Move all children with the dragged node
+            // Move all children with the dragged node (reuse vector to prevent memory leak)
             childOffsets.forEach((offset, childId) => {
                 const childMesh = nodes.get(childId);
                 if (childMesh && childMesh.visible) {
-                    const childNewPos = newPos.clone().add(offset);
-                    childMesh.userData.spring.target.copy(childNewPos);
+                    _childTempPos.copy(_dragIntersect).add(offset);
+                    childMesh.userData.spring.target.copy(_childTempPos);
                 }
             });
 
@@ -22076,7 +22077,7 @@ function onPointerMove(event) {
                     // Update ghost line to point to target
                     if (reparentGhostLine) {
                         const positions = reparentGhostLine.geometry.attributes.position;
-                        positions.setXYZ(0, newPos.x, newPos.y, newPos.z);
+                        positions.setXYZ(0, _dragIntersect.x, _dragIntersect.y, _dragIntersect.z);
                         positions.setXYZ(1, hitMesh.position.x, hitMesh.position.y, hitMesh.position.z);
                         positions.needsUpdate = true;
                         reparentGhostLine.material.color.setHex(0x00ff00);
@@ -22102,8 +22103,8 @@ function onPointerMove(event) {
             // Update ghost line if no target
             if (!reparentTarget && reparentGhostLine) {
                 const positions = reparentGhostLine.geometry.attributes.position;
-                positions.setXYZ(0, newPos.x, newPos.y, newPos.z);
-                positions.setXYZ(1, newPos.x, newPos.y, newPos.z);
+                positions.setXYZ(0, _dragIntersect.x, _dragIntersect.y, _dragIntersect.z);
+                positions.setXYZ(1, _dragIntersect.x, _dragIntersect.y, _dragIntersect.z);
                 positions.needsUpdate = true;
                 reparentGhostLine.material.color.setHex(0xffffff);
             }
@@ -22150,21 +22151,20 @@ function onPointerMove(event) {
     if (!draggedNode || !moveMode) return;
 
     raycaster.setFromCamera(mouse, camera);
-    const intersectPoint = new THREE.Vector3();
-    raycaster.ray.intersectPlane(dragPlane, intersectPoint);
+    raycaster.ray.intersectPlane(dragPlane, _dragIntersect);
 
-    if (intersectPoint) {
-        const newPos = intersectPoint.add(dragOffset);
-        draggedNode.userData.spring.target.copy(newPos);
-        draggedNode.userData.basePosition = [newPos.x, newPos.y, newPos.z];
+    if (_dragIntersect) {
+        _dragIntersect.add(dragOffset);
+        draggedNode.userData.spring.target.copy(_dragIntersect);
+        draggedNode.userData.basePosition = [_dragIntersect.x, _dragIntersect.y, _dragIntersect.z];
 
-        // Move all children with the parent
+        // Move all children with the parent (reuse vector to prevent memory leak)
         childOffsets.forEach((offset, childId) => {
             const childMesh = nodes.get(childId);
             if (childMesh && childMesh.visible) {
-                const childNewPos = newPos.clone().add(offset);
-                childMesh.userData.spring.target.copy(childNewPos);
-                childMesh.userData.basePosition = [childNewPos.x, childNewPos.y, childNewPos.z];
+                _childTempPos.copy(_dragIntersect).add(offset);
+                childMesh.userData.spring.target.copy(_childTempPos);
+                childMesh.userData.basePosition = [_childTempPos.x, _childTempPos.y, _childTempPos.z];
 
                 // Update child's connection line
                 if (childMesh.userData.connectionLine && childMesh.userData.parent) {
