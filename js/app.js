@@ -5852,6 +5852,7 @@ class PersonalNeuralNet {
         this.expansionPatterns = new Map(); // Learned parent->children patterns
         this.patternWeights = new Map(); // Weights for parent->child pairs (incremental learning)
         this.embeddings = new Map(); // Cache embeddings for nodes
+        this.maxEmbeddingCacheSize = 500; // Limit cache to prevent memory bloat
         this.isReady = false;
         this.isInitializing = false; // Track if initialization is in progress
         this.isTraining = false;
@@ -5870,6 +5871,16 @@ class PersonalNeuralNet {
             onSuggestion: [],
             onIncrementalLearn: []
         };
+    }
+
+    // Cache embedding with LRU-style eviction to prevent memory bloat
+    cacheEmbedding(key, vector) {
+        // If at capacity, remove oldest entries (first 10% of cache)
+        if (this.embeddings.size >= this.maxEmbeddingCacheSize) {
+            const keysToDelete = Array.from(this.embeddings.keys()).slice(0, Math.floor(this.maxEmbeddingCacheSize * 0.1));
+            keysToDelete.forEach(k => this.embeddings.delete(k));
+        }
+        this.embeddings.set(key, vector);
     }
 
     // Initialize the encoder and load any saved models
@@ -6020,7 +6031,7 @@ class PersonalNeuralNet {
                 return null;
             }
 
-            this.embeddings.set(cacheKey, vector);
+            this.cacheEmbedding(cacheKey, vector);
             return vector;
         } catch (error) {
             // If worker fails, try main thread fallback
@@ -6030,7 +6041,7 @@ class PersonalNeuralNet {
                     const embedding = await embeddings.array();
                     const vector = embedding[0];
                     embeddings.dispose();
-                    this.embeddings.set(cacheKey, vector);
+                    this.cacheEmbedding(cacheKey, vector);
                     return vector;
                 } catch (e) {
                     console.error('Embedding fallback error:', e);
@@ -6095,7 +6106,7 @@ class PersonalNeuralNet {
             // Cache and fill results
             uncachedTexts.forEach((text, i) => {
                 const cacheKey = text.toLowerCase().trim();
-                this.embeddings.set(cacheKey, vectors[i]);
+                this.cacheEmbedding(cacheKey, vectors[i]);
                 results[uncachedIndices[i]] = vectors[i];
             });
 
@@ -6110,7 +6121,7 @@ class PersonalNeuralNet {
 
                     uncachedTexts.forEach((text, i) => {
                         const cacheKey = text.toLowerCase().trim();
-                        this.embeddings.set(cacheKey, vectors[i]);
+                        this.cacheEmbedding(cacheKey, vectors[i]);
                         results[uncachedIndices[i]] = vectors[i];
                     });
 
@@ -6728,7 +6739,7 @@ class PersonalNeuralNet {
             embeddings.dispose();
 
             toProcess.forEach((text, i) => {
-                this.embeddings.set(text, embeddingArrays[i]);
+                this.cacheEmbedding(text, embeddingArrays[i]);
             });
 
             // If more pending, continue processing
@@ -6846,18 +6857,27 @@ class PersonalNeuralNet {
                         completedCount++;
                         if (completedCount >= expectedCount) {
 
-                            // Restore models on main thread
+                            // Restore models on main thread (dispose old models first to prevent memory leak)
                             if (results.categoryWeights && this.categories.length > 1) {
+                                if (this.categoryModel) {
+                                    this.categoryModel.dispose();
+                                }
                                 this.categoryModel = this.buildCategoryModel(this.categories.length);
                                 await this.restoreModelWeights(this.categoryModel, results.categoryWeights);
                             }
 
                             if (results.connectionWeights) {
+                                if (this.connectionModel) {
+                                    this.connectionModel.dispose();
+                                }
                                 this.connectionModel = this.buildConnectionModel();
                                 await this.restoreModelWeights(this.connectionModel, results.connectionWeights);
                             }
 
                             if (results.predictionWeights) {
+                                if (this.predictionModel) {
+                                    this.predictionModel.dispose();
+                                }
                                 this.predictionModel = this.buildPredictionModel();
                                 await this.restoreModelWeights(this.predictionModel, results.predictionWeights);
                             }
@@ -6978,7 +6998,10 @@ class PersonalNeuralNet {
         try {
             // Train category model (0-33%)
             if (this.categories.length > 1 && categoryData.inputs.length > 0) {
-
+                // Dispose old model to prevent memory leak
+                if (this.categoryModel) {
+                    this.categoryModel.dispose();
+                }
                 this.categoryModel = this.buildCategoryModel(this.categories.length);
 
                 const xs = tf.tensor2d(categoryData.inputs);
@@ -7010,7 +7033,10 @@ class PersonalNeuralNet {
 
             // Train connection model (33-66%)
             if (connectionData.inputs.length > 10) {
-
+                // Dispose old model to prevent memory leak
+                if (this.connectionModel) {
+                    this.connectionModel.dispose();
+                }
                 this.connectionModel = this.buildConnectionModel();
 
                 const xs = tf.tensor2d(connectionData.inputs);
@@ -7041,7 +7067,10 @@ class PersonalNeuralNet {
 
             // Train prediction model (66-100%)
             if (predictionData.inputs.length > 5) {
-
+                // Dispose old model to prevent memory leak
+                if (this.predictionModel) {
+                    this.predictionModel.dispose();
+                }
                 this.predictionModel = this.buildPredictionModel();
 
                 const xs = tf.tensor2d(predictionData.inputs);
