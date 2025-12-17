@@ -67,15 +67,11 @@ const TensorFlowLoader = {
                 // Load Universal Sentence Encoder
                 await this.loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/universal-sentence-encoder@1.3.3/dist/universal-sentence-encoder.min.js');
 
-                // Initialize GPU backend with memory management
+                // Initialize GPU backend
                 if (typeof tf !== 'undefined') {
                     try {
                         await tf.setBackend('webgl');
                         await tf.ready();
-
-                        // Memory management - reduce GPU memory pressure
-                        tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0); // Delete textures immediately
-                        tf.env().set('WEBGL_FLUSH_THRESHOLD', -1); // Flush GPU commands immediately
                     } catch (e) {
                     }
                 }
@@ -5551,9 +5547,6 @@ const createModelWorker = (modelType) => {
             try {
                 await tf.setBackend('webgl');
                 await tf.ready();
-                // Memory management - reduce GPU memory pressure
-                tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0);
-                tf.env().set('WEBGL_FLUSH_THRESHOLD', -1);
                 return tf.getBackend();
             } catch (e) {
                 return 'cpu';
@@ -5769,13 +5762,10 @@ const createEmbeddingWorker = () => {
         // Initialize encoder
         async function init() {
             try {
-                // Try WebGL backend with memory management
+                // Try WebGL backend
                 try {
                     await tf.setBackend('webgl');
                     await tf.ready();
-                    // Memory management - reduce GPU memory pressure
-                    tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0);
-                    tf.env().set('WEBGL_FLUSH_THRESHOLD', -1);
                 } catch (e) {
                 }
 
