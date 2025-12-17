@@ -19701,13 +19701,13 @@ function initScene() {
         const mouseX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         const mouseY = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-        // Create a ray from camera through mouse position
-        const zoomRaycaster = new THREE.Raycaster();
-        zoomRaycaster.setFromCamera(new THREE.Vector2(mouseX, mouseY), camera);
+        // Create a ray from camera through mouse position (reuse objects to prevent memory leak)
+        _zoomMouse.set(mouseX, mouseY);
+        _zoomRaycaster.setFromCamera(_zoomMouse, camera);
 
         // Find point on a plane at the target distance
         const targetDistance = camera.position.distanceTo(controls.target);
-        const zoomPoint = zoomRaycaster.ray.at(targetDistance, new THREE.Vector3());
+        const zoomPoint = _zoomRaycaster.ray.at(targetDistance, _tempVec3A);
 
         // Calculate zoom factor
         const zoomSpeed = 0.001;
@@ -19717,13 +19717,13 @@ function initScene() {
 
         // Move target towards zoom point while zooming in, away while zooming out
         const zoomFactor = 1 - (newDistance / currentDistance);
-        const targetShift = new THREE.Vector3().subVectors(zoomPoint, controls.target).multiplyScalar(zoomFactor * 0.5);
-        controls.target.add(targetShift);
+        _tempVec3B.subVectors(zoomPoint, controls.target).multiplyScalar(zoomFactor * 0.5);
+        controls.target.add(_tempVec3B);
         cameraTargetGoal.copy(controls.target); // Sync the goal
 
         // Update camera distance
-        const direction = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
-        camera.position.copy(controls.target).add(direction.multiplyScalar(newDistance));
+        _tempVec3C.subVectors(camera.position, controls.target).normalize();
+        camera.position.copy(controls.target).add(_tempVec3C.multiplyScalar(newDistance));
 
         controls.update();
     }, { passive: false });
@@ -19755,9 +19755,9 @@ function initScene() {
                 Math.min(controls.maxDistance, initialCameraDistance * pinchRatio)
             );
 
-            // Update camera distance
-            const direction = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
-            camera.position.copy(controls.target).add(direction.multiplyScalar(newDistance));
+            // Update camera distance (reuse object to prevent memory leak)
+            _tempVec3A.subVectors(camera.position, controls.target).normalize();
+            camera.position.copy(controls.target).add(_tempVec3A.multiplyScalar(newDistance));
 
             controls.update();
         }
@@ -21783,14 +21783,14 @@ function animate() {
                 (cameraArcAnimation.endRadius - cameraArcAnimation.startRadius) * ease;
             const currentRadius = baseRadius + arcProgress * cameraArcAnimation.arcBoost;
 
-            // Convert spherical back to cartesian, relative to current target
-            const newOffset = new THREE.Vector3(
+            // Convert spherical back to cartesian, relative to current target (reuse object to prevent memory leak)
+            _tempVec3A.set(
                 Math.sin(currentTheta) * Math.sin(currentPhi) * currentRadius,
                 Math.cos(currentPhi) * currentRadius,
                 Math.cos(currentTheta) * Math.sin(currentPhi) * currentRadius
             );
 
-            camera.position.copy(controls.target).add(newOffset);
+            camera.position.copy(controls.target).add(_tempVec3A);
         } else if (cameraArcAnimation.endCameraPos) {
             // Fallback linear interpolation
             camera.position.lerpVectors(
@@ -21807,11 +21807,11 @@ function animate() {
             cameraArcAnimation = null;
         }
     } else if (!userInteracting) {
-        // Normal slow follow when no arc animation and not interacting
-        const targetDiff = new THREE.Vector3().subVectors(cameraTargetGoal, controls.target);
-        const step = targetDiff.multiplyScalar(CONFIG.ANIMATION.cameraFollowSpeed);
-        controls.target.add(step);
-        camera.position.add(step);
+        // Normal slow follow when no arc animation and not interacting (reuse object to prevent memory leak)
+        _tempVec3B.subVectors(cameraTargetGoal, controls.target);
+        _tempVec3B.multiplyScalar(CONFIG.ANIMATION.cameraFollowSpeed);
+        controls.target.add(_tempVec3B);
+        camera.position.add(_tempVec3B);
     }
 
     // Update animation controller with count of animating nodes
@@ -21824,6 +21824,14 @@ function animate() {
 // UI INTERACTIONS
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
+
+// Reusable objects to prevent memory leaks in animation loop and event handlers
+const _tempVec3A = new THREE.Vector3();
+const _tempVec3B = new THREE.Vector3();
+const _tempVec3C = new THREE.Vector3();
+const _zoomRaycaster = new THREE.Raycaster();
+const _zoomMouse = new THREE.Vector2();
+
 let moveMode = false;
 let draggedNode = null;
 let dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
