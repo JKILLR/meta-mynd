@@ -15480,6 +15480,13 @@ const AutonomousEvolution = {
     },
 
     async callAIForEvolution(question, context, mode) {
+        // Check for API key
+        const apiKey = localStorage.getItem(CONFIG.API_KEY);
+        if (!apiKey) {
+            console.warn('Self-evolution requires API key');
+            return null;
+        }
+
         // Use the existing callAI infrastructure but with evolution-specific prompt
         const evolutionPrompt = `You are MYND in self-reflection mode, analyzing yourself to evolve and improve.
 
@@ -15519,7 +15526,7 @@ Respond with a JSON object:
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'x-api-key': CONFIG.CLAUDE_API_KEY,
+                    'x-api-key': apiKey,
                     'anthropic-version': '2023-06-01',
                     'anthropic-dangerous-direct-browser-access': 'true'
                 },
@@ -19637,6 +19644,13 @@ function isNeuralTrainingAllowed() {
     return neuralTrainingEnabled && !neuralTrainingPaused;
 }
 
+// Reusable objects to prevent memory leaks in animation loop and event handlers
+const _tempVec3A = new THREE.Vector3();
+const _tempVec3B = new THREE.Vector3();
+const _tempVec3C = new THREE.Vector3();
+const _zoomRaycaster = new THREE.Raycaster();
+const _zoomMouse = new THREE.Vector2();
+
 function initScene() {
     // Scene
     scene = new THREE.Scene();
@@ -21824,14 +21838,6 @@ function animate() {
 // UI INTERACTIONS
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
-
-// Reusable objects to prevent memory leaks in animation loop and event handlers
-const _tempVec3A = new THREE.Vector3();
-const _tempVec3B = new THREE.Vector3();
-const _tempVec3C = new THREE.Vector3();
-const _zoomRaycaster = new THREE.Raycaster();
-const _zoomMouse = new THREE.Vector2();
-
 let moveMode = false;
 let draggedNode = null;
 let dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
