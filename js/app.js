@@ -6857,29 +6857,45 @@ class PersonalNeuralNet {
                         completedCount++;
                         if (completedCount >= expectedCount) {
 
-                            // Restore models on main thread (dispose old models first to prevent memory leak)
+                            // Restore models using create-then-swap pattern to prevent data loss on failure
                             if (results.categoryWeights && this.categories.length > 1) {
-                                if (this.categoryModel) {
-                                    this.categoryModel.dispose();
+                                try {
+                                    const newModel = this.buildCategoryModel(this.categories.length);
+                                    await this.restoreModelWeights(newModel, results.categoryWeights);
+                                    // Only dispose old model after new one is successfully created
+                                    if (this.categoryModel) {
+                                        this.categoryModel.dispose();
+                                    }
+                                    this.categoryModel = newModel;
+                                } catch (e) {
+                                    console.error('Failed to restore category model:', e);
                                 }
-                                this.categoryModel = this.buildCategoryModel(this.categories.length);
-                                await this.restoreModelWeights(this.categoryModel, results.categoryWeights);
                             }
 
                             if (results.connectionWeights) {
-                                if (this.connectionModel) {
-                                    this.connectionModel.dispose();
+                                try {
+                                    const newModel = this.buildConnectionModel();
+                                    await this.restoreModelWeights(newModel, results.connectionWeights);
+                                    if (this.connectionModel) {
+                                        this.connectionModel.dispose();
+                                    }
+                                    this.connectionModel = newModel;
+                                } catch (e) {
+                                    console.error('Failed to restore connection model:', e);
                                 }
-                                this.connectionModel = this.buildConnectionModel();
-                                await this.restoreModelWeights(this.connectionModel, results.connectionWeights);
                             }
 
                             if (results.predictionWeights) {
-                                if (this.predictionModel) {
-                                    this.predictionModel.dispose();
+                                try {
+                                    const newModel = this.buildPredictionModel();
+                                    await this.restoreModelWeights(newModel, results.predictionWeights);
+                                    if (this.predictionModel) {
+                                        this.predictionModel.dispose();
+                                    }
+                                    this.predictionModel = newModel;
+                                } catch (e) {
+                                    console.error('Failed to restore prediction model:', e);
                                 }
-                                this.predictionModel = this.buildPredictionModel();
-                                await this.restoreModelWeights(this.predictionModel, results.predictionWeights);
                             }
 
                             // Cleanup
@@ -6996,106 +7012,136 @@ class PersonalNeuralNet {
     // Fallback: Train on main thread if Web Workers aren't available
     async trainOnMainThread(categoryData, connectionData, predictionData) {
         try {
-            // Train category model (0-33%)
+            // Train category model (0-33%) using create-then-swap pattern
             if (this.categories.length > 1 && categoryData.inputs.length > 0) {
-                // Dispose old model to prevent memory leak
-                if (this.categoryModel) {
-                    this.categoryModel.dispose();
-                }
-                this.categoryModel = this.buildCategoryModel(this.categories.length);
+                let newModel = null;
+                let xs = null;
+                let ys = null;
+                try {
+                    newModel = this.buildCategoryModel(this.categories.length);
+                    xs = tf.tensor2d(categoryData.inputs);
+                    ys = tf.tensor2d(categoryData.outputs);
 
-                const xs = tf.tensor2d(categoryData.inputs);
-                const ys = tf.tensor2d(categoryData.outputs);
-
-                await this.categoryModel.fit(xs, ys, {
-                    epochs: CONFIG.NEURAL_NET.epochs,
-                    batchSize: CONFIG.NEURAL_NET.batchSize,
-                    validationSplit: 0.2,
-                    shuffle: true,
-                    callbacks: {
-                        onEpochEnd: async (epoch, logs) => {
-                            this.trainingProgress = ((epoch + 1) / CONFIG.NEURAL_NET.epochs) * 33;
-                            this.emit('onTrainingProgress', {
-                                phase: 'category',
-                                progress: this.trainingProgress,
-                                accuracy: logs.acc,
-                                loss: logs.loss
-                            });
-                            // Yield to UI
-                            await tf.nextFrame();
+                    await newModel.fit(xs, ys, {
+                        epochs: CONFIG.NEURAL_NET.epochs,
+                        batchSize: CONFIG.NEURAL_NET.batchSize,
+                        validationSplit: 0.2,
+                        shuffle: true,
+                        callbacks: {
+                            onEpochEnd: async (epoch, logs) => {
+                                this.trainingProgress = ((epoch + 1) / CONFIG.NEURAL_NET.epochs) * 33;
+                                this.emit('onTrainingProgress', {
+                                    phase: 'category',
+                                    progress: this.trainingProgress,
+                                    accuracy: logs.acc,
+                                    loss: logs.loss
+                                });
+                                // Yield to UI
+                                await tf.nextFrame();
+                            }
                         }
-                    }
-                });
+                    });
 
-                xs.dispose();
-                ys.dispose();
+                    // Only dispose old model after successful training
+                    if (this.categoryModel) {
+                        this.categoryModel.dispose();
+                    }
+                    this.categoryModel = newModel;
+                    newModel = null; // Prevent disposal in finally
+                } catch (e) {
+                    console.error('Failed to train category model:', e);
+                    if (newModel) newModel.dispose();
+                } finally {
+                    if (xs) xs.dispose();
+                    if (ys) ys.dispose();
+                }
             }
 
-            // Train connection model (33-66%)
+            // Train connection model (33-66%) using create-then-swap pattern
             if (connectionData.inputs.length > 10) {
-                // Dispose old model to prevent memory leak
-                if (this.connectionModel) {
-                    this.connectionModel.dispose();
-                }
-                this.connectionModel = this.buildConnectionModel();
+                let newModel = null;
+                let xs = null;
+                let ys = null;
+                try {
+                    newModel = this.buildConnectionModel();
+                    xs = tf.tensor2d(connectionData.inputs);
+                    ys = tf.tensor2d(connectionData.outputs);
 
-                const xs = tf.tensor2d(connectionData.inputs);
-                const ys = tf.tensor2d(connectionData.outputs);
-
-                await this.connectionModel.fit(xs, ys, {
-                    epochs: CONFIG.NEURAL_NET.epochs,
-                    batchSize: CONFIG.NEURAL_NET.batchSize,
-                    validationSplit: 0.2,
-                    shuffle: true,
-                    callbacks: {
-                        onEpochEnd: async (epoch, logs) => {
-                            this.trainingProgress = 33 + ((epoch + 1) / CONFIG.NEURAL_NET.epochs) * 33;
-                            this.emit('onTrainingProgress', {
-                                phase: 'connection',
-                                progress: this.trainingProgress,
-                                accuracy: logs.acc,
-                                loss: logs.loss
-                            });
-                            await tf.nextFrame();
+                    await newModel.fit(xs, ys, {
+                        epochs: CONFIG.NEURAL_NET.epochs,
+                        batchSize: CONFIG.NEURAL_NET.batchSize,
+                        validationSplit: 0.2,
+                        shuffle: true,
+                        callbacks: {
+                            onEpochEnd: async (epoch, logs) => {
+                                this.trainingProgress = 33 + ((epoch + 1) / CONFIG.NEURAL_NET.epochs) * 33;
+                                this.emit('onTrainingProgress', {
+                                    phase: 'connection',
+                                    progress: this.trainingProgress,
+                                    accuracy: logs.acc,
+                                    loss: logs.loss
+                                });
+                                await tf.nextFrame();
+                            }
                         }
-                    }
-                });
+                    });
 
-                xs.dispose();
-                ys.dispose();
+                    // Only dispose old model after successful training
+                    if (this.connectionModel) {
+                        this.connectionModel.dispose();
+                    }
+                    this.connectionModel = newModel;
+                    newModel = null; // Prevent disposal in finally
+                } catch (e) {
+                    console.error('Failed to train connection model:', e);
+                    if (newModel) newModel.dispose();
+                } finally {
+                    if (xs) xs.dispose();
+                    if (ys) ys.dispose();
+                }
             }
 
-            // Train prediction model (66-100%)
+            // Train prediction model (66-100%) using create-then-swap pattern
             if (predictionData.inputs.length > 5) {
-                // Dispose old model to prevent memory leak
-                if (this.predictionModel) {
-                    this.predictionModel.dispose();
-                }
-                this.predictionModel = this.buildPredictionModel();
+                let newModel = null;
+                let xs = null;
+                let ys = null;
+                try {
+                    newModel = this.buildPredictionModel();
+                    xs = tf.tensor2d(predictionData.inputs);
+                    ys = tf.tensor2d(predictionData.outputs);
 
-                const xs = tf.tensor2d(predictionData.inputs);
-                const ys = tf.tensor2d(predictionData.outputs);
-
-                await this.predictionModel.fit(xs, ys, {
-                    epochs: CONFIG.NEURAL_NET.epochs,
-                    batchSize: Math.min(CONFIG.NEURAL_NET.batchSize, predictionData.inputs.length),
-                    validationSplit: 0.2,
-                    shuffle: true,
-                    callbacks: {
-                        onEpochEnd: async (epoch, logs) => {
-                            this.trainingProgress = 66 + ((epoch + 1) / CONFIG.NEURAL_NET.epochs) * 34;
-                            this.emit('onTrainingProgress', {
-                                phase: 'prediction',
-                                progress: this.trainingProgress,
-                                loss: logs.loss
-                            });
-                            await tf.nextFrame();
+                    await newModel.fit(xs, ys, {
+                        epochs: CONFIG.NEURAL_NET.epochs,
+                        batchSize: Math.min(CONFIG.NEURAL_NET.batchSize, predictionData.inputs.length),
+                        validationSplit: 0.2,
+                        shuffle: true,
+                        callbacks: {
+                            onEpochEnd: async (epoch, logs) => {
+                                this.trainingProgress = 66 + ((epoch + 1) / CONFIG.NEURAL_NET.epochs) * 34;
+                                this.emit('onTrainingProgress', {
+                                    phase: 'prediction',
+                                    progress: this.trainingProgress,
+                                    loss: logs.loss
+                                });
+                                await tf.nextFrame();
+                            }
                         }
-                    }
-                });
+                    });
 
-                xs.dispose();
-                ys.dispose();
+                    // Only dispose old model after successful training
+                    if (this.predictionModel) {
+                        this.predictionModel.dispose();
+                    }
+                    this.predictionModel = newModel;
+                    newModel = null; // Prevent disposal in finally
+                } catch (e) {
+                    console.error('Failed to train prediction model:', e);
+                    if (newModel) newModel.dispose();
+                } finally {
+                    if (xs) xs.dispose();
+                    if (ys) ys.dispose();
+                }
             }
 
             // Save models
