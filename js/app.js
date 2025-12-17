@@ -5665,16 +5665,12 @@ const createModelWorker = (modelType) => {
                         xs = tf.tensor2d(data.inputs);
                         ys = tf.tensor2d(data.outputs);
 
-                        // Create sample weights tensor if feedback weights are provided
-                        const hasSampleWeights = data.sampleWeights && data.sampleWeights.length === data.inputs.length;
-                        const sw = hasSampleWeights ? tf.tensor1d(data.sampleWeights) : null;
-
+                        // Note: sampleWeight removed - not supported by all TensorFlow.js backends
                         await model.fit(xs, ys, {
                             epochs: CONFIG.epochs,
                             batchSize: CONFIG.batchSize,
                             validationSplit: 0.2,
                             shuffle: true,
-                            sampleWeight: sw,
                             callbacks: {
                                 onEpochEnd: (epoch, logs) => {
                                     self.postMessage({
@@ -5690,7 +5686,6 @@ const createModelWorker = (modelType) => {
 
                         weights = await extractWeights(model);
                         xs.dispose(); ys.dispose(); model.dispose();
-                        if (sw) sw.dispose();
 
                     } else if (modelType === 'connection' && data.inputs.length > 10) {
                         self.postMessage({ type: 'progress', modelType, progress: 0 });
@@ -5698,16 +5693,11 @@ const createModelWorker = (modelType) => {
                         xs = tf.tensor2d(data.inputs);
                         ys = tf.tensor2d(data.outputs);
 
-                        // Create sample weights tensor if feedback weights are provided
-                        const hasSampleWeights = data.sampleWeights && data.sampleWeights.length === data.inputs.length;
-                        const sw = hasSampleWeights ? tf.tensor1d(data.sampleWeights) : null;
-
                         await model.fit(xs, ys, {
                             epochs: CONFIG.epochs,
                             batchSize: CONFIG.batchSize,
                             validationSplit: 0.2,
                             shuffle: true,
-                            sampleWeight: sw,
                             callbacks: {
                                 onEpochEnd: (epoch, logs) => {
                                     self.postMessage({
@@ -5723,7 +5713,6 @@ const createModelWorker = (modelType) => {
 
                         weights = await extractWeights(model);
                         xs.dispose(); ys.dispose(); model.dispose();
-                        if (sw) sw.dispose();
 
                     } else if (modelType === 'prediction' && data.inputs.length > 5) {
                         self.postMessage({ type: 'progress', modelType, progress: 0 });
@@ -5731,16 +5720,11 @@ const createModelWorker = (modelType) => {
                         xs = tf.tensor2d(data.inputs);
                         ys = tf.tensor2d(data.outputs);
 
-                        // Create sample weights tensor if feedback weights are provided
-                        const hasSampleWeights = data.sampleWeights && data.sampleWeights.length === data.inputs.length;
-                        const sw = hasSampleWeights ? tf.tensor1d(data.sampleWeights) : null;
-
                         await model.fit(xs, ys, {
                             epochs: CONFIG.epochs,
                             batchSize: Math.min(CONFIG.batchSize, data.inputs.length),
                             validationSplit: 0.2,
                             shuffle: true,
-                            sampleWeight: sw,
                             callbacks: {
                                 onEpochEnd: (epoch, logs) => {
                                     self.postMessage({
@@ -5755,7 +5739,6 @@ const createModelWorker = (modelType) => {
 
                         weights = await extractWeights(model);
                         xs.dispose(); ys.dispose(); model.dispose();
-                        if (sw) sw.dispose();
                     }
 
                     self.postMessage({ type: 'complete', modelType, weights });
@@ -7217,26 +7200,17 @@ class PersonalNeuralNet {
             const xs = tf.tensor2d([embedding]);
             const ys = tf.tensor2d([target]);
 
-            // Do a single training step with adjusted learning rate
-            // We temporarily update the optimizer's learning rate
-            const originalLR = this.categoryModel.optimizer.learningRate;
-
-            // TensorFlow.js doesn't allow changing LR directly, so we do 1 epoch
-            // with sample weight to simulate LR adjustment
-            const sampleWeight = tf.tensor1d([onlineLearningRate / CONFIG.NEURAL_NET.learningRate]);
-
+            // Do a single training step (sampleWeight removed - not supported by all backends)
             await this.categoryModel.fit(xs, ys, {
                 epochs: 1,
                 batchSize: 1,
                 shuffle: false,
-                verbose: 0,
-                sampleWeight: sampleWeight
+                verbose: 0
             });
 
             // Cleanup
             xs.dispose();
             ys.dispose();
-            sampleWeight.dispose();
             // Emit event for UI feedback
             this.emit('onOnlineLearning', { action, predicted, chosen });
 
@@ -19733,10 +19707,16 @@ function isNeuralTrainingAllowed() {
 const _tempVec3A = new THREE.Vector3();
 const _tempVec3B = new THREE.Vector3();
 const _tempVec3C = new THREE.Vector3();
+const _tempVec3D = new THREE.Vector3();
+const _tempVec3E = new THREE.Vector3();
 const _zoomRaycaster = new THREE.Raycaster();
 const _zoomMouse = new THREE.Vector2();
 const _dragIntersect = new THREE.Vector3();
 const _childTempPos = new THREE.Vector3();
+const _tapRaycaster = new THREE.Raycaster();
+const _tapMouse = new THREE.Vector2();
+const _cameraDir = new THREE.Vector3();
+const _intersectPoint = new THREE.Vector3();
 
 function initScene() {
     // Scene
@@ -19889,10 +19869,10 @@ function initScene() {
                 const x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
                 const y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
 
-                const tapRaycaster = new THREE.Raycaster();
-                tapRaycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+                _tapMouse.set(x, y);
+                _tapRaycaster.setFromCamera(_tapMouse, camera);
                 const visibleNodes = Array.from(nodes.values()).filter(n => n.visible);
-                const intersects = tapRaycaster.intersectObjects(visibleNodes);
+                const intersects = _tapRaycaster.intersectObjects(visibleNodes);
 
                 if (intersects.length === 0) {
                     // Double-tapped on empty space - zoom to fit entire map
@@ -21277,13 +21257,14 @@ function resetCamera() {
     // Reset camera target goal to origin
     cameraTargetGoal.set(0, 0, 0);
 
+    const zeroVec = _tempVec3E.set(0, 0, 0); // Reuse for lerp target
     function animate() {
         const elapsed = Date.now() - startTime;
         const progress = Math.min(elapsed / duration, 1);
         const ease = easeOutCubic(progress);
 
         camera.position.lerpVectors(startPos, targetPos, ease);
-        controls.target.lerp(new THREE.Vector3(0, 0, 0), ease);
+        controls.target.lerp(zeroVec, ease);
 
         if (progress < 1) requestAnimationFrame(animate);
     }
@@ -21309,6 +21290,7 @@ function zoomToFitMap(extraZoom = 0) {
     const startTime = Date.now();
 
     cameraTargetGoal.set(0, 0, 0);
+    const zeroVec = _tempVec3E.set(0, 0, 0); // Reuse for lerp target
 
     function animate() {
         const elapsed = Date.now() - startTime;
@@ -21316,7 +21298,7 @@ function zoomToFitMap(extraZoom = 0) {
         const ease = easeOutCubic(progress);
 
         camera.position.lerpVectors(startPos, targetPos, ease);
-        controls.target.lerp(new THREE.Vector3(0, 0, 0), ease);
+        controls.target.lerp(zeroVec, ease);
 
         if (progress < 1) requestAnimationFrame(animate);
     }
@@ -22009,15 +21991,13 @@ function onPointerDown(event) {
                 mesh.userData.connectionLine.visible = false;
             }
 
-            // Set up drag plane facing camera
-            const cameraDir = new THREE.Vector3();
-            camera.getWorldDirection(cameraDir);
-            dragPlane.setFromNormalAndCoplanarPoint(cameraDir.negate(), mesh.position);
+            // Set up drag plane facing camera (reuse _cameraDir to prevent memory leak)
+            camera.getWorldDirection(_cameraDir);
+            dragPlane.setFromNormalAndCoplanarPoint(_cameraDir.negate(), mesh.position);
 
-            // Calculate offset
-            const intersectPoint = new THREE.Vector3();
-            raycaster.ray.intersectPlane(dragPlane, intersectPoint);
-            dragOffset.subVectors(mesh.position, intersectPoint);
+            // Calculate offset (reuse _intersectPoint to prevent memory leak)
+            raycaster.ray.intersectPlane(dragPlane, _intersectPoint);
+            dragOffset.subVectors(mesh.position, _intersectPoint);
 
             // Store offsets for all visible descendants
             childOffsets.clear();
@@ -22050,15 +22030,13 @@ function onPointerDown(event) {
             controls.enabled = false;
             renderer.domElement.style.cursor = 'grabbing';
 
-            // Set up drag plane facing camera
-            const cameraDir = new THREE.Vector3();
-            camera.getWorldDirection(cameraDir);
-            dragPlane.setFromNormalAndCoplanarPoint(cameraDir.negate(), mesh.position);
+            // Set up drag plane facing camera (reuse _cameraDir to prevent memory leak)
+            camera.getWorldDirection(_cameraDir);
+            dragPlane.setFromNormalAndCoplanarPoint(_cameraDir.negate(), mesh.position);
 
-            // Calculate offset
-            const intersectPoint = new THREE.Vector3();
-            raycaster.ray.intersectPlane(dragPlane, intersectPoint);
-            dragOffset.subVectors(mesh.position, intersectPoint);
+            // Calculate offset (reuse _intersectPoint to prevent memory leak)
+            raycaster.ray.intersectPlane(dragPlane, _intersectPoint);
+            dragOffset.subVectors(mesh.position, _intersectPoint);
 
             // Store offsets for all visible descendants so they move with parent
             childOffsets.clear();
@@ -29568,8 +29546,8 @@ if (mobileZoomSlider && mobileZoomThumb) {
 
         // Map position to distance (top = close, bottom = far)
         const newDistance = minDistance + (percent * (maxDistance - minDistance));
-        const direction = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
-        camera.position.copy(controls.target).add(direction.multiplyScalar(newDistance));
+        _tempVec3D.subVectors(camera.position, controls.target).normalize();
+        camera.position.copy(controls.target).add(_tempVec3D.multiplyScalar(newDistance));
         controls.update();
     }
 
